@@ -18,6 +18,7 @@ import { CartDrawer } from './components/CartDrawer';
 import { CheckoutModal } from './components/CheckoutModal';
 import { AdminInventoryView } from './components/AdminInventoryView';
 import { GoogleAuthModal } from './components/GoogleAuthModal';
+import { LoginPage } from './components/LoginPage';
 
 export function App() {
   // Master data and Inventory state
@@ -25,7 +26,7 @@ export function App() {
   const [inventory, setInventory] = useState<ProductInventoryItem[]>(INITIAL_INVENTORY);
   const [orders, setOrders] = useState<Order[]>([]);
 
-  // User & Google Auth state
+  // User & Google Auth state (check localStorage)
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('cardverse_user');
     if (saved) {
@@ -35,15 +36,7 @@ export function App() {
         return null;
       }
     }
-    // Default logged in as Admin seree999@gmail.com for convenient testing
-    return {
-      id: 'admin-seree999',
-      email: 'seree999@gmail.com',
-      name: 'Seree (Admin)',
-      avatar_url: 'https://api.dicebear.com/7.x/bottts/svg?seed=seree999',
-      role: 'ADMIN',
-      store_credit: 10000,
-    };
+    return null;
   });
   const [isAuthOpen, setIsAuthOpen] = useState(false);
 
@@ -52,7 +45,7 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [currency, setCurrency] = useState<Currency>('THB');
   const [uiLang, setUiLang] = useState<UILanguage>('th');
-  const [activeView, setActiveView] = useState<'SHOP' | 'ADMIN'>('SHOP');
+  const [activeView, setActiveView] = useState<'SHOP' | 'ADMIN' | 'LOGIN'>('SHOP');
 
   // Modal inspection state
   const [inspectedCard, setInspectedCard] = useState<{
@@ -66,7 +59,7 @@ export function App() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [reservationTimeRemaining, setReservationTimeRemaining] = useState<number | null>(null);
 
-  // Persist user
+  // Persist user in localStorage
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem('cardverse_user', JSON.stringify(currentUser));
@@ -78,10 +71,11 @@ export function App() {
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
     if (user.role === 'ADMIN' || user.email.toLowerCase() === 'seree999@gmail.com') {
-      // Keep or allow switching to Admin
+      setActiveView('ADMIN');
     } else {
       setActiveView('SHOP');
     }
+    setIsAuthOpen(false);
   };
 
   const handleLogout = () => {
@@ -177,11 +171,6 @@ export function App() {
       )
     );
 
-    // If paid by store credit, deduct user store credit
-    if (currentUser && newOrder.paymentMethod === 'Bank Transfer') {
-      // demo credit deduct
-    }
-
     // Clear cart
     setCartItems([]);
     setReservationTimeRemaining(null);
@@ -230,17 +219,22 @@ export function App() {
         setActiveView={setActiveView}
         reservationTimeRemaining={reservationTimeRemaining}
         currentUser={currentUser}
-        onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenAuth={() => setActiveView('LOGIN')}
         onLogout={handleLogout}
       />
 
       {/* Main Content Body */}
       <main className="flex-1">
-        {activeView === 'SHOP' ? (
+        {activeView === 'LOGIN' ? (
+          /* Dedicated Google Login Page */
+          <LoginPage
+            onLoginSuccess={handleLoginSuccess}
+            onBackToShop={() => setActiveView('SHOP')}
+          />
+        ) : activeView === 'SHOP' ? (
           <>
             {/* Top promotional banner */}
             <HeroBanner onSelectSet={(tag) => setSearchQuery(tag)} />
-
 
             {/* Comprehensive Card Explorer & Live Stock Matrix */}
             <CardExplorer
@@ -281,7 +275,7 @@ export function App() {
         </p>
       </footer>
 
-      {/* Google Auth Modal */}
+      {/* Google Auth Modal (if opened anywhere) */}
       <GoogleAuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}

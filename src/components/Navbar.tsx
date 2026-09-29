@@ -14,8 +14,8 @@ interface NavbarProps {
   setUiLang: (l: UILanguage) => void;
   cartCount: number;
   openCart: () => void;
-  activeView: 'SHOP' | 'ADMIN';
-  setActiveView: (v: 'SHOP' | 'ADMIN') => void;
+  activeView: 'SHOP' | 'ADMIN' | 'LOGIN';
+  setActiveView: (v: 'SHOP' | 'ADMIN' | 'LOGIN') => void;
   reservationTimeRemaining: number | null;
   currentUser: User | null;
   onOpenAuth: () => void;
