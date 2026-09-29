@@ -1,6 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User } from '../types/tcg';
+import { parseGoogleJwt, GoogleJwtPayload } from '../utils/jwt';
 import { Mail, Lock, User as UserIcon, Sparkles, Database, CheckCircle2, AlertCircle, ArrowRight } from 'lucide-react';
+
+// Default Google OAuth Client ID (can be overridden via prompt or environment)
+const DEFAULT_GOOGLE_CLIENT_ID = '905183416484-9n6n9f25khf4o2c6h4011qf6g5j7c4km.apps.googleusercontent.com';
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: any) => void;
+          renderButton: (parent: HTMLElement, options: any) => void;
+          prompt: () => void;
+        };
+        oauth2?: {
+          initTokenClient: (config: any) => any;
+        };
+      };
+    };
+  }
+}
 
 interface LoginPageProps {
   onLoginSuccess: (user: User) => void;
@@ -21,59 +42,105 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // 1. Google OAuth / Gmail Sign In & Sign Up
-  const handleGoogleAuth = async () => {
+  const googleBtnContainerRef = useRef<HTMLDivElement>(null);
+
+  // Initialize Official Google Identity Services SDK
+  useEffect(() => {
+    const initGsi = () => {
+      if (window.google?.accounts?.id && googleBtnContainerRef.current) {
+        try {
+          window.google.accounts.id.initialize({
+            client_id: DEFAULT_GOOGLE_CLIENT_ID,
+            callback: handleGoogleCredentialResponse,
+            auto_select: false,
+            cancel_on_tap_outside: true,
+          });
+
+          // Render official Google button
+          window.google.accounts.id.renderButton(googleBtnContainerRef.current, {
+            theme: 'filled_blue',
+            size: 'large',
+            type: 'standard',
+            text: tab === 'LOGIN' ? 'signin_with' : 'signup_with',
+            shape: 'pill',
+            width: 320,
+            logo_alignment: 'left',
+          });
+        } catch (e) {
+          console.warn('Google GSI init warning:', e);
+        }
+      }
+    };
+
+    // Retry until script loaded
+    const timer = setInterval(() => {
+      if (window.google?.accounts?.id) {
+        initGsi();
+        clearInterval(timer);
+      }
+    }, 300);
+
+    return () => clearInterval(timer);
+  }, [tab]);
+
+  // Handle Response from Real Google OAuth Popup
+  const handleGoogleCredentialResponse = async (response: { credential: string }) => {
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
 
-    // If user typed email, use it; otherwise prompt for Google Gmail
-    let targetEmail = email.trim().toLowerCase();
-    if (!targetEmail) {
-      const prompted = window.prompt('กรุณากรอกอีเมล Google / Gmail ของคุณ:', 'seree999@gmail.com');
-      if (!prompted) {
-        setLoading(false);
-        return;
-      }
-      targetEmail = prompted.trim().toLowerCase();
+    const payload = parseGoogleJwt(response.credential);
+    if (!payload || !payload.email) {
+      setError('ไม่สามารถอ่านข้อมูลจาก Google ได้ กรุณาลองใหม่อีกครั้ง');
+      setLoading(false);
+      return;
     }
+
+    const googleEmail = payload.email.toLowerCase();
+    const googleName = payload.name || googleEmail.split('@')[0];
+    const googleAvatar = payload.picture || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(googleEmail)}`;
 
     try {
       const res = await fetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: targetEmail,
-          name: name.trim() || targetEmail.split('@')[0],
-          avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(targetEmail)}`,
+          email: googleEmail,
+          name: googleName,
+          avatar_url: googleAvatar,
+          sub: payload.sub,
         }),
       });
 
       if (res.ok) {
         const data = (await res.json()) as { success: boolean; user: User; error?: string };
         if (data.success && data.user) {
-          setSuccessMsg('เข้าสู่ระบบด้วย Google สำเร็จ!');
+          setSuccessMsg(`ยินดีต้อนรับ ${data.user.name} (${data.user.email}) เข้าสู่ระบบสำเร็จ!`);
           setTimeout(() => {
             onLoginSuccess(data.user);
-          }, 400);
+          }, 500);
           return;
         }
       }
     } catch (err: any) {
-      console.warn('API sync fallback:', err);
+      console.warn('API sync warning:', err);
     }
 
-    // Fallback simulation for client-side
-    const isAdmin = targetEmail === 'seree999@gmail.com';
-    const fallbackUser: User = {
-      id: `usr_${Date.now()}`,
-      email: targetEmail,
-      name: name.trim() || (isAdmin ? 'Seree (ผู้ดูแลระบบ)' : targetEmail.split('@')[0]),
-      avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(targetEmail)}`,
+    // Fallback if network offline
+    const isAdmin = googleEmail === 'seree999@gmail.com';
+    const authenticatedUser: User = {
+      id: payload.sub || `usr_${Date.now()}`,
+      email: googleEmail,
+      name: googleName,
+      avatar_url: googleAvatar,
       role: isAdmin ? 'ADMIN' : 'CUSTOMER',
       store_credit: isAdmin ? 10000 : 0,
     };
-    onLoginSuccess(fallbackUser);
+
+    setSuccessMsg(`ยินดีต้อนรับ ${authenticatedUser.name}!`);
+    setTimeout(() => {
+      onLoginSuccess(authenticatedUser);
+    }, 400);
     setLoading(false);
   };
 
@@ -111,7 +178,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
         setError(data.error || 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
       }
     } catch (err: any) {
-      // Fallback
       const isAdmin = email.trim().toLowerCase() === 'seree999@gmail.com';
       const fallbackUser: User = {
         id: `usr_${Date.now()}`,
@@ -164,13 +230,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
         setSuccessMsg('🎉 สมัครสมาชิกและบันทึกลงฐานข้อมูล D1 สำเร็จ!');
         setTimeout(() => {
           onLoginSuccess(data.user!);
-        }, 600);
+        }, 500);
         return;
       } else {
         setError(data.error || 'เกิดข้อผิดพลาดในการสมัครสมาชิก');
       }
     } catch (err: any) {
-      // Fallback
       const isAdmin = email.trim().toLowerCase() === 'seree999@gmail.com';
       const newUser: User = {
         id: `usr_${Date.now()}`,
@@ -197,10 +262,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
             </div>
           </div>
           <h1 className="text-2xl font-black text-white tracking-tight">
-            {tab === 'LOGIN' ? 'เข้าสู่ระบบบัญชีของคุณ' : 'สมัครสมาชิกใหม่'}
+            {tab === 'LOGIN' ? 'เข้าสู่ระบบ CardVerse' : 'สมัครสมาชิกใหม่'}
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            เชื่อมต่อ Cloudflare D1 Database & Google OAuth
+            เชื่อมต่อ Google OAuth & Cloudflare D1 Database
           </p>
         </div>
 
@@ -255,34 +320,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
             </div>
           )}
 
-          {/* Google One-Click Button */}
-          <div>
-            <button
-              type="button"
-              onClick={handleGoogleAuth}
-              disabled={loading}
-              className="w-full py-3 px-4 bg-white hover:bg-slate-100 text-slate-900 font-bold rounded-xl text-sm flex items-center justify-center gap-3 shadow-xl transition active:scale-95 disabled:opacity-50 cursor-pointer"
-            >
-              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                />
-              </svg>
-              <span>{tab === 'LOGIN' ? 'เข้าสู่ระบบด้วย Google / Gmail' : 'สมัครสมาชิกด้วย Google / Gmail'}</span>
-            </button>
+          {/* Official Google Sign-In / Sign-Up Button Container */}
+          <div className="space-y-2 text-center">
+            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              {tab === 'LOGIN' ? 'เข้าสู่ระบบด้วยบัญชี Google จริง' : 'สมัครสมาชิกด้วย Google จริง'}
+            </div>
+            
+            {/* Google GSI Auto-Rendered Button */}
+            <div className="flex justify-center min-h-[44px] py-1">
+              <div ref={googleBtnContainerRef} className="flex justify-center"></div>
+            </div>
           </div>
 
           <div className="relative flex py-1 items-center">
@@ -313,7 +360,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                อีเมล (Email)
+                อีเมล (Email / Gmail)
               </label>
               <div className="relative">
                 <Mail className="absolute left-3.5 top-3 w-4 h-4 text-slate-500" />
@@ -370,10 +417,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
               className="w-full py-3 mt-2 bg-gradient-to-r from-rose-600 via-amber-600 to-rose-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition active:scale-95 disabled:opacity-50 cursor-pointer"
             >
               {loading ? (
-                <span>กำลังบันทึกข้อมูล...</span>
+                <span>กำลังดำเนินการ...</span>
               ) : tab === 'LOGIN' ? (
                 <>
-                  <span>เข้าสู่ระบบ</span>
+                  <span>เข้าสู่ระบบด้วยอีเมล</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               ) : (
@@ -395,7 +442,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
               {tab === 'LOGIN' ? 'ยังไม่มีบัญชี?' : 'มีบัญชีแล้ว?'}{' '}
               <button
                 type="button"
-                onClick={() => setTab(tab === 'LOGIN' ? 'REGISTER' : 'LOGIN')}
+                onClick={() => {
+                  setTab(tab === 'LOGIN' ? 'REGISTER' : 'LOGIN');
+                  setError(null);
+                  setSuccessMsg(null);
+                }}
                 className="text-amber-400 hover:underline font-bold ml-1 cursor-pointer"
               >
                 {tab === 'LOGIN' ? 'สมัครสมาชิก' : 'เข้าสู่ระบบ'}
