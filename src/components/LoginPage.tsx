@@ -17,9 +17,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
 
-  // Google Client ID Config
+  // Google Client ID Config (Production Client ID)
+  const OFFICIAL_GOOGLE_CLIENT_ID = '835281919061-llqkdv4gqj97taos0i1i2p4f2t268phq.apps.googleusercontent.com';
   const [googleClientId, setGoogleClientId] = useState<string>(() => {
-    return localStorage.getItem('custom_google_client_id') || '';
+    return localStorage.getItem('custom_google_client_id') || OFFICIAL_GOOGLE_CLIENT_ID;
   });
   const [showConfig, setShowConfig] = useState(false);
 

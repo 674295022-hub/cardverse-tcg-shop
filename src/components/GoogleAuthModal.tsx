@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User } from '../types/tcg';
+import { parseGoogleJwt } from '../utils/jwt';
 import { X, Mail, Lock, User as UserIcon, Sparkles, Database, CheckCircle2, AlertCircle } from 'lucide-react';
+
+const OFFICIAL_GOOGLE_CLIENT_ID = '835281919061-llqkdv4gqj97taos0i1i2p4f2t268phq.apps.googleusercontent.com';
 
 interface GoogleAuthModalProps {
   isOpen: boolean;
@@ -16,29 +19,69 @@ export function GoogleAuthModal({ isOpen, onClose, onLoginSuccess }: GoogleAuthM
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const googleModalBtnRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const initGsi = () => {
+      if ((window as any).google?.accounts?.id && googleModalBtnRef.current) {
+        try {
+          googleModalBtnRef.current.innerHTML = '';
+          (window as any).google.accounts.id.initialize({
+            client_id: OFFICIAL_GOOGLE_CLIENT_ID,
+            callback: (res: { credential: string }) => {
+              const payload = parseGoogleJwt(res.credential);
+              if (payload && payload.email) {
+                syncAndLogin(payload.email, payload.name || payload.email.split('@')[0], payload.picture);
+              }
+            },
+            auto_select: false,
+            cancel_on_tap_outside: true,
+          });
+
+          (window as any).google.accounts.id.renderButton(googleModalBtnRef.current, {
+            theme: 'filled_blue',
+            size: 'large',
+            type: 'standard',
+            text: tab === 'LOGIN' ? 'signin_with' : 'signup_with',
+            shape: 'pill',
+            width: 280,
+            logo_alignment: 'left',
+          });
+        } catch (e) {
+          console.warn('Modal GSI error:', e);
+        }
+      }
+    };
+
+    const timer = setInterval(() => {
+      if ((window as any).google?.accounts?.id) {
+        initGsi();
+        clearInterval(timer);
+      }
+    }, 300);
+
+    return () => clearInterval(timer);
+  }, [isOpen, tab]);
+
   if (!isOpen) return null;
 
-  const handleGoogleAuth = async () => {
+  const syncAndLogin = async (targetEmail: string, targetName: string, avatarUrl?: string) => {
     setLoading(true);
     setError(null);
-    let targetEmail = email.trim().toLowerCase();
-    if (!targetEmail) {
-      const prompted = window.prompt('กรุณากรอกอีเมล Google / Gmail ของคุณ:', 'seree999@gmail.com');
-      if (!prompted) {
-        setLoading(false);
-        return;
-      }
-      targetEmail = prompted.trim().toLowerCase();
-    }
+    const cleanEmail = targetEmail.trim().toLowerCase();
+    const cleanName = targetName.trim() || cleanEmail.split('@')[0];
+    const cleanAvatar = avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanEmail)}`;
 
     try {
       const res = await fetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: targetEmail,
-          name: name.trim() || targetEmail.split('@')[0],
-          avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(targetEmail)}`,
+          email: cleanEmail,
+          name: cleanName,
+          avatar_url: cleanAvatar,
         }),
       });
 
@@ -51,15 +94,15 @@ export function GoogleAuthModal({ isOpen, onClose, onLoginSuccess }: GoogleAuthM
         }
       }
     } catch (e) {
-      console.warn('Fallback local auth:', e);
+      console.warn('API sync warning:', e);
     }
 
-    const isAdmin = targetEmail === 'seree999@gmail.com';
+    const isAdmin = cleanEmail === 'seree999@gmail.com';
     const fallbackUser: User = {
       id: `usr_${Date.now()}`,
-      email: targetEmail,
-      name: name.trim() || (isAdmin ? 'Seree (Admin)' : targetEmail.split('@')[0]),
-      avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(targetEmail)}`,
+      email: cleanEmail,
+      name: cleanName,
+      avatar_url: cleanAvatar,
       role: isAdmin ? 'ADMIN' : 'CUSTOMER',
       store_credit: isAdmin ? 10000 : 0,
     };
@@ -70,6 +113,11 @@ export function GoogleAuthModal({ isOpen, onClose, onLoginSuccess }: GoogleAuthM
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email) {
+      setError('กรุณากรอกอีเมล');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -131,7 +179,7 @@ export function GoogleAuthModal({ isOpen, onClose, onLoginSuccess }: GoogleAuthM
             {tab === 'LOGIN' ? 'เข้าสู่ระบบบัญชีของคุณ' : 'สมัครสมาชิกใหม่'}
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Cloudflare D1 Database & Google Gmail
+            Cloudflare D1 Database & Google OAuth
           </p>
         </div>
 
@@ -170,37 +218,14 @@ export function GoogleAuthModal({ isOpen, onClose, onLoginSuccess }: GoogleAuthM
           </div>
         )}
 
-        {/* Google OAuth Button */}
-        <button
-          type="button"
-          onClick={handleGoogleAuth}
-          disabled={loading}
-          className="w-full py-2.5 px-3 bg-white hover:bg-slate-100 text-slate-900 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-md transition active:scale-95 disabled:opacity-50 cursor-pointer mb-3"
-        >
-          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-            <path
-              fill="#4285F4"
-              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-            />
-          </svg>
-          <span>{tab === 'LOGIN' ? 'เข้าสู่ระบบด้วย Google' : 'สมัครสมาชิกด้วย Google'}</span>
-        </button>
+        {/* Google GSI Auto-Rendered Button Container */}
+        <div className="flex justify-center min-h-[44px] py-1 mb-2">
+          <div ref={googleModalBtnRef} className="flex justify-center"></div>
+        </div>
 
         <div className="relative flex py-1 items-center mb-3">
           <div className="flex-grow border-t border-slate-800"></div>
-          <span className="flex-shrink mx-2 text-[10px] text-slate-500 uppercase">หรือใช้อีเมล</span>
+          <span className="flex-shrink mx-2 text-[10px] text-slate-500 uppercase">หรือใช้อีเมลและรหัสผ่าน</span>
           <div className="flex-grow border-t border-slate-800"></div>
         </div>
 
