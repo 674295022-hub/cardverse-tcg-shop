@@ -234,7 +234,11 @@ export function App() {
         ) : activeView === 'SHOP' ? (
           <>
             {/* Top promotional banner */}
-            <HeroBanner onSelectSet={(tag) => setSearchQuery(tag)} />
+            <HeroBanner
+              onSelectSet={(tag) => setSearchQuery(tag)}
+              onOpenLogin={() => setActiveView('LOGIN')}
+              currentUser={currentUser}
+            />
 
             {/* Comprehensive Card Explorer & Live Stock Matrix */}
             <CardExplorer

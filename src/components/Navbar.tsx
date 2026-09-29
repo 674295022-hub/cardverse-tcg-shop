@@ -257,6 +257,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             🏴‍☠️ One Piece Card Game (วันพีช)
           </button>
 
+          {/* Direct Login Bar Button */}
+          <button
+            onClick={onOpenAuth}
+            className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap transition-all font-bold ${
+              activeView === 'LOGIN'
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                : 'bg-blue-600/20 text-blue-300 border border-blue-500/40 hover:bg-blue-600 hover:text-white'
+            }`}
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>{currentUser ? `บัญชี: ${currentUser.name}` : '🔑 เข้าสู่ระบบ Google / Gmail'}</span>
+          </button>
+
           {reservationTimeRemaining !== null && reservationTimeRemaining > 0 && (
             <div className="ml-auto flex items-center gap-1.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 px-3 py-1 rounded-full text-xs animate-pulse">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
