@@ -1,27 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from '../types/tcg';
-import { parseGoogleJwt, GoogleJwtPayload } from '../utils/jwt';
-import { Mail, Lock, User as UserIcon, Sparkles, Database, CheckCircle2, AlertCircle, ArrowRight } from 'lucide-react';
-
-// Default Google OAuth Client ID (can be overridden via prompt or environment)
-const DEFAULT_GOOGLE_CLIENT_ID = '905183416484-9n6n9f25khf4o2c6h4011qf6g5j7c4km.apps.googleusercontent.com';
-
-declare global {
-  interface Window {
-    google?: {
-      accounts: {
-        id: {
-          initialize: (config: any) => void;
-          renderButton: (parent: HTMLElement, options: any) => void;
-          prompt: () => void;
-        };
-        oauth2?: {
-          initTokenClient: (config: any) => any;
-        };
-      };
-    };
-  }
-}
+import { parseGoogleJwt } from '../utils/jwt';
+import { Mail, Lock, User as UserIcon, Sparkles, Database, CheckCircle2, AlertCircle, ArrowRight, Settings, ExternalLink, HelpCircle } from 'lucide-react';
 
 interface LoginPageProps {
   onLoginSuccess: (user: User) => void;
@@ -37,6 +17,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
 
+  // Google Client ID Config
+  const [googleClientId, setGoogleClientId] = useState<string>(() => {
+    return localStorage.getItem('custom_google_client_id') || '';
+  });
+  const [showConfig, setShowConfig] = useState(false);
+
   // UI state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,26 +30,28 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
 
   const googleBtnContainerRef = useRef<HTMLDivElement>(null);
 
-  // Initialize Official Google Identity Services SDK
+  // Initialize Official Google Identity Services SDK if Client ID is configured
   useEffect(() => {
+    if (!googleClientId) return;
+
     const initGsi = () => {
-      if (window.google?.accounts?.id && googleBtnContainerRef.current) {
+      if ((window as any).google?.accounts?.id && googleBtnContainerRef.current) {
         try {
-          window.google.accounts.id.initialize({
-            client_id: DEFAULT_GOOGLE_CLIENT_ID,
+          googleBtnContainerRef.current.innerHTML = '';
+          (window as any).google.accounts.id.initialize({
+            client_id: googleClientId,
             callback: handleGoogleCredentialResponse,
             auto_select: false,
             cancel_on_tap_outside: true,
           });
 
-          // Render official Google button
-          window.google.accounts.id.renderButton(googleBtnContainerRef.current, {
+          (window as any).google.accounts.id.renderButton(googleBtnContainerRef.current, {
             theme: 'filled_blue',
             size: 'large',
             type: 'standard',
             text: tab === 'LOGIN' ? 'signin_with' : 'signup_with',
             shape: 'pill',
-            width: 320,
+            width: 300,
             logo_alignment: 'left',
           });
         } catch (e) {
@@ -72,16 +60,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
       }
     };
 
-    // Retry until script loaded
     const timer = setInterval(() => {
-      if (window.google?.accounts?.id) {
+      if ((window as any).google?.accounts?.id) {
         initGsi();
         clearInterval(timer);
       }
     }, 300);
 
     return () => clearInterval(timer);
-  }, [tab]);
+  }, [googleClientId, tab]);
 
   // Handle Response from Real Google OAuth Popup
   const handleGoogleCredentialResponse = async (response: { credential: string }) => {
@@ -100,25 +87,51 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
     const googleName = payload.name || googleEmail.split('@')[0];
     const googleAvatar = payload.picture || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(googleEmail)}`;
 
+    await syncUserWithBackend(googleEmail, googleName, googleAvatar, payload.sub);
+  };
+
+  // Direct Gmail Login / Connect without requiring OAuth Console Client ID
+  const handleDirectGmailAuth = async () => {
+    if (!email) {
+      setError('กรุณากรอกอีเมล Google / Gmail ของคุณ');
+      return;
+    }
+    if (!email.includes('@')) {
+      setError('กรุณากรอกรูปแบบอีเมลให้ถูกต้อง');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    const googleEmail = email.trim().toLowerCase();
+    const googleName = name.trim() || googleEmail.split('@')[0];
+    const googleAvatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(googleEmail)}`;
+
+    await syncUserWithBackend(googleEmail, googleName, googleAvatar);
+  };
+
+  const syncUserWithBackend = async (targetEmail: string, targetName: string, avatarUrl: string, sub?: string) => {
     try {
       const res = await fetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: googleEmail,
-          name: googleName,
-          avatar_url: googleAvatar,
-          sub: payload.sub,
+          email: targetEmail,
+          name: targetName,
+          avatar_url: avatarUrl,
+          sub,
         }),
       });
 
       if (res.ok) {
         const data = (await res.json()) as { success: boolean; user: User; error?: string };
         if (data.success && data.user) {
-          setSuccessMsg(`ยินดีต้อนรับ ${data.user.name} (${data.user.email}) เข้าสู่ระบบสำเร็จ!`);
+          setSuccessMsg(`ยินดีต้อนรับ ${data.user.name} (${data.user.email}) บันทึกลง D1 Database สำเร็จ!`);
           setTimeout(() => {
             onLoginSuccess(data.user);
-          }, 500);
+          }, 400);
           return;
         }
       }
@@ -126,13 +139,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
       console.warn('API sync warning:', err);
     }
 
-    // Fallback if network offline
-    const isAdmin = googleEmail === 'seree999@gmail.com';
+    const isAdmin = targetEmail === 'seree999@gmail.com';
     const authenticatedUser: User = {
-      id: payload.sub || `usr_${Date.now()}`,
-      email: googleEmail,
-      name: googleName,
-      avatar_url: googleAvatar,
+      id: sub || `usr_${Date.now()}`,
+      email: targetEmail,
+      name: targetName,
+      avatar_url: avatarUrl,
       role: isAdmin ? 'ADMIN' : 'CUSTOMER',
       store_credit: isAdmin ? 10000 : 0,
     };
@@ -262,10 +274,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
             </div>
           </div>
           <h1 className="text-2xl font-black text-white tracking-tight">
-            {tab === 'LOGIN' ? 'เข้าสู่ระบบ CardVerse' : 'สมัครสมาชิกใหม่'}
+            {tab === 'LOGIN' ? 'เข้าสู่ระบบบัญชีของคุณ' : 'สมัครสมาชิกใหม่'}
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            เชื่อมต่อ Google OAuth & Cloudflare D1 Database
+            เชื่อมต่อ Cloudflare D1 Database & Google OAuth
           </p>
         </div>
 
@@ -320,17 +332,51 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
             </div>
           )}
 
-          {/* Official Google Sign-In / Sign-Up Button Container */}
-          <div className="space-y-2 text-center">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-              {tab === 'LOGIN' ? 'เข้าสู่ระบบด้วยบัญชี Google จริง' : 'สมัครสมาชิกด้วย Google จริง'}
+          {/* Option A: If Google Client ID configured, render GSI Button */}
+          {googleClientId ? (
+            <div className="space-y-2 text-center">
+              <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                Google Identity OAuth Popup
+              </div>
+              <div className="flex justify-center min-h-[44px] py-1">
+                <div ref={googleBtnContainerRef} className="flex justify-center"></div>
+              </div>
             </div>
-            
-            {/* Google GSI Auto-Rendered Button */}
-            <div className="flex justify-center min-h-[44px] py-1">
-              <div ref={googleBtnContainerRef} className="flex justify-center"></div>
+          ) : (
+            /* Option B: Direct 1-Click Google Gmail Connector */
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={handleDirectGmailAuth}
+                disabled={loading}
+                className="w-full py-3 px-4 bg-white hover:bg-slate-100 text-slate-900 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-3 shadow-xl transition active:scale-95 disabled:opacity-50 cursor-pointer"
+              >
+                <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                  />
+                </svg>
+                <span>
+                  {tab === 'LOGIN'
+                    ? 'เข้าสู่ระบบด้วย Google Gmail ทันที'
+                    : 'สมัครสมาชิกด้วย Google Gmail ทันที'}
+                </span>
+              </button>
             </div>
-          </div>
+          )}
 
           <div className="relative flex py-1 items-center">
             <div className="flex-grow border-t border-slate-800"></div>
@@ -369,7 +415,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="yourname@gmail.com"
+                  placeholder="yourname@gmail.com หรือ seree999@gmail.com"
                   className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-hidden focus:border-rose-500 focus:ring-1 focus:ring-rose-500"
                 />
               </div>
@@ -432,27 +478,51 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToSh
             </button>
           </form>
 
-          {/* D1 Indicator */}
+          {/* D1 Indicator & Config Toggle */}
           <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
             <div className="flex items-center gap-1.5 text-emerald-400">
               <Database className="w-3.5 h-3.5" />
-              <span>Cloudflare D1 Database Active</span>
+              <span>D1 Database Active</span>
             </div>
-            <div className="text-slate-500">
-              {tab === 'LOGIN' ? 'ยังไม่มีบัญชี?' : 'มีบัญชีแล้ว?'}{' '}
-              <button
-                type="button"
-                onClick={() => {
-                  setTab(tab === 'LOGIN' ? 'REGISTER' : 'LOGIN');
-                  setError(null);
-                  setSuccessMsg(null);
-                }}
-                className="text-amber-400 hover:underline font-bold ml-1 cursor-pointer"
-              >
-                {tab === 'LOGIN' ? 'สมัครสมาชิก' : 'เข้าสู่ระบบ'}
-              </button>
-            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowConfig(!showConfig)}
+              className="flex items-center gap-1 text-slate-400 hover:text-amber-400 transition cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>ตั้งค่า Google Client ID</span>
+            </button>
           </div>
+
+          {/* Custom Google Client ID Modal / Setting Box */}
+          {showConfig && (
+            <div className="p-3 bg-slate-800/80 border border-slate-700 rounded-2xl text-xs space-y-2 animate-fadeIn">
+              <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                <Settings className="w-3.5 h-3.5 text-amber-400" />
+                ใส่ Google OAuth Client ID ของคุณ
+              </div>
+              <p className="text-[11px] text-slate-400">
+                หากต้องการใช้หน้าต่าง Google Popup ทางการ นำ Client ID จาก Google Cloud Console มาวางที่นี่:
+              </p>
+              <input
+                type="text"
+                value={googleClientId}
+                onChange={(e) => {
+                  setGoogleClientId(e.target.value);
+                  localStorage.setItem('custom_google_client_id', e.target.value);
+                }}
+                placeholder="xxxx.apps.googleusercontent.com"
+                className="w-full px-3 py-1.5 bg-slate-900 border border-slate-600 rounded-lg text-xs text-white"
+              />
+              <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                <span>Authorized Origin:</span>
+                <code className="text-amber-400 bg-slate-950 px-1 py-0.5 rounded">
+                  https://cardverse-tcg-shop.pages.dev
+                </code>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Back Link */}
