@@ -45,7 +45,15 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [currency, setCurrency] = useState<Currency>('THB');
   const [uiLang, setUiLang] = useState<UILanguage>('th');
-  const [activeView, setActiveView] = useState<'SHOP' | 'ADMIN' | 'LOGIN'>('SHOP');
+  const [activeView, setActiveView] = useState<'SHOP' | 'ADMIN' | 'LOGIN'>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('view') === 'login' || params.get('login') === 'true') {
+        return 'LOGIN';
+      }
+    }
+    return 'SHOP';
+  });
 
   // Modal inspection state
   const [inspectedCard, setInspectedCard] = useState<{
