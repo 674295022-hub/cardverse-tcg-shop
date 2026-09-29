@@ -1,3 +1,9 @@
 name = "cardverse-tcg-shop"
 compatibility_date = "2024-09-23"
 pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cardverse-db"
+database_id = "75c07e7c-fe1e-43d3-b510-3b20edf1f153"
+

@@ -104,3 +104,13 @@ export interface Order {
 
 export type Currency = 'THB' | 'USD' | 'JPY';
 export type UILanguage = 'th' | 'en' | 'ja';
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  avatar_url?: string;
+  role: 'ADMIN' | 'CUSTOMER';
+  store_credit: number;
+}
+

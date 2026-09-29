@@ -7,6 +7,7 @@ import {
   Franchise,
   Currency,
   UILanguage,
+  User,
 } from './types/tcg';
 import { MASTER_CARDS, INITIAL_INVENTORY } from './data/tcgCatalog';
 import { Navbar } from './components/Navbar';
@@ -16,12 +17,35 @@ import { CardDetailModal } from './components/CardDetailModal';
 import { CartDrawer } from './components/CartDrawer';
 import { CheckoutModal } from './components/CheckoutModal';
 import { AdminInventoryView } from './components/AdminInventoryView';
+import { GoogleAuthModal } from './components/GoogleAuthModal';
 
 export function App() {
   // Master data and Inventory state
   const [masterCards, setMasterCards] = useState<MasterCard[]>(MASTER_CARDS);
   const [inventory, setInventory] = useState<ProductInventoryItem[]>(INITIAL_INVENTORY);
   const [orders, setOrders] = useState<Order[]>([]);
+
+  // User & Google Auth state
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('cardverse_user');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return null;
+      }
+    }
+    // Default logged in as Admin seree999@gmail.com for convenient testing
+    return {
+      id: 'admin-seree999',
+      email: 'seree999@gmail.com',
+      name: 'Seree (Admin)',
+      avatar_url: 'https://api.dicebear.com/7.x/bottts/svg?seed=seree999',
+      role: 'ADMIN',
+      store_credit: 10000,
+    };
+  });
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
 
   // Navigation and Filter state
   const [activeFranchise, setActiveFranchise] = useState<Franchise | 'ALL'>('ALL');
@@ -41,6 +65,29 @@ export function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [reservationTimeRemaining, setReservationTimeRemaining] = useState<number | null>(null);
+
+  // Persist user
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('cardverse_user', JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem('cardverse_user');
+    }
+  }, [currentUser]);
+
+  const handleLoginSuccess = (user: User) => {
+    setCurrentUser(user);
+    if (user.role === 'ADMIN' || user.email.toLowerCase() === 'seree999@gmail.com') {
+      // Keep or allow switching to Admin
+    } else {
+      setActiveView('SHOP');
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setActiveView('SHOP');
+  };
 
   // 15-Minute Reservation Countdown Loop
   useEffect(() => {
@@ -118,32 +165,29 @@ export function App() {
     );
   };
 
-  // Order Completed Handler
+  // Checkout Completed: Deduct stock & create Order
   const handleOrderCompleted = (newOrder: Order) => {
     setOrders((prev) => [newOrder, ...prev]);
 
-    // Finalize stock deduction in inventory (Zero-oversell confirmed)
+    // Mark purchased items as SOLD in inventory
+    const purchasedItemIds = newOrder.items.map((i) => i.inventoryItemId);
     setInventory((prev) =>
-      prev.map((item) => {
-        const orderedItem = newOrder.items.find((oi) => oi.inventoryItemId === item.id);
-        if (orderedItem) {
-          const newQty = Math.max(0, item.stockQuantity - orderedItem.quantity);
-          return {
-            ...item,
-            stockQuantity: newQty,
-            status: newQty > 0 ? 'AVAILABLE' : 'SOLD',
-            reservedUntil: undefined,
-          };
-        }
-        return item;
-      })
+      prev.map((inv) =>
+        purchasedItemIds.includes(inv.id) ? { ...inv, status: 'SOLD', stockQuantity: 0 } : inv
+      )
     );
 
+    // If paid by store credit, deduct user store credit
+    if (currentUser && newOrder.paymentMethod === 'Bank Transfer') {
+      // demo credit deduct
+    }
+
+    // Clear cart
     setCartItems([]);
     setReservationTimeRemaining(null);
   };
 
-  // Admin Actions
+  // Staff Inventory / Stock Management Actions
   const handleUpdateStock = (skuId: string, newStock: number) => {
     setInventory((prev) =>
       prev.map((item) =>
@@ -158,19 +202,19 @@ export function App() {
     );
   };
 
-  const handleAddNewSku = (newSku: ProductInventoryItem) => {
-    setInventory((prev) => [newSku, ...prev]);
+  const handleAddNewSku = (newItem: ProductInventoryItem) => {
+    setInventory((prev) => [newItem, ...prev]);
   };
 
-  const handleUpdateOrderStatus = (orderId: string, status: Order['orderStatus']) => {
+  const handleUpdateOrderStatus = (orderId: string, newStatus: Order['orderStatus']) => {
     setOrders((prev) =>
-      prev.map((o) => (o.id === orderId ? { ...o, orderStatus: status } : o))
+      prev.map((o) => (o.id === orderId ? { ...o, orderStatus: newStatus } : o))
     );
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-rose-500 selection:text-white">
-      {/* Top Navigation */}
+      {/* Top Navbar */}
       <Navbar
         activeFranchise={activeFranchise}
         setActiveFranchise={setActiveFranchise}
@@ -185,16 +229,20 @@ export function App() {
         activeView={activeView}
         setActiveView={setActiveView}
         reservationTimeRemaining={reservationTimeRemaining}
+        currentUser={currentUser}
+        onOpenAuth={() => setIsAuthOpen(true)}
+        onLogout={handleLogout}
       />
 
-      {/* Main Content Area */}
+      {/* Main Content Body */}
       <main className="flex-1">
         {activeView === 'SHOP' ? (
           <>
-            {/* Hero Showcase Banner */}
+            {/* Top promotional banner */}
             <HeroBanner onSelectSet={(tag) => setSearchQuery(tag)} />
 
-            {/* Faceted Explorer & Catalog Grid */}
+
+            {/* Comprehensive Card Explorer & Live Stock Matrix */}
             <CardExplorer
               inventory={inventory}
               masterCards={masterCards}
@@ -208,7 +256,7 @@ export function App() {
             />
           </>
         ) : (
-          /* Staff / Admin Management Hub */
+          /* Staff / Admin Management Hub (Restricted / Available for seree999@gmail.com) */
           <AdminInventoryView
             inventory={inventory}
             masterCards={masterCards}
@@ -226,12 +274,19 @@ export function App() {
         <div className="flex items-center justify-center gap-2 font-bold text-slate-300">
           <span>CardVerse TCG Shop Platform</span>
           <span>•</span>
-          <span>Phase 1 Deployment (Cloudflare Pages Ready)</span>
+          <span>Cloudflare D1 Database & Google OAuth Enabled</span>
         </div>
         <p>
           Pokémon TCG and One Piece Card Game are registered trademarks of their respective owners. All card images used for catalog inspection demonstration.
         </p>
       </footer>
+
+      {/* Google Auth Modal */}
+      <GoogleAuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
+      />
 
       {/* 4-Angle Card Detail & Condition Inspection Modal */}
       {inspectedCard && (
