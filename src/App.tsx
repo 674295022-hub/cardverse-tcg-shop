@@ -19,6 +19,7 @@ import { CheckoutModal } from './components/CheckoutModal';
 import { AdminInventoryView } from './components/AdminInventoryView';
 import { GoogleAuthModal } from './components/GoogleAuthModal';
 import { LoginPage } from './components/LoginPage';
+import { ChatWidget } from './components/ChatWidget';
 
 export function App() {
   // Master data and Inventory state
@@ -330,6 +331,9 @@ export function App() {
         onOrderCompleted={handleOrderCompleted}
         timeRemaining={reservationTimeRemaining}
       />
+
+      {/* Floating AI Chatbot Widget */}
+      <ChatWidget />
     </div>
   );
 }

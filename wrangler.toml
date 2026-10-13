@@ -7,3 +7,6 @@ binding = "DB"
 database_name = "cardverse-db"
 database_id = "75c07e7c-fe1e-43d3-b510-3b20edf1f153"
 
+[ai]
+binding = "AI"
+
